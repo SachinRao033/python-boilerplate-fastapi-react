@@ -6,45 +6,57 @@ on:
       - main
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------------
+      # 1. Checkout Repository
+      # --------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-
+      # --------------------------------
+      # 2. Login to Docker Hub
+      # --------------------------------
       - name: Login Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Backend
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/boilerplate-backend:latest .
+      # --------------------------------
+      # 3. Build & Push Backend
+      # --------------------------------
+      - name: Build and Push Backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/boilerplate-backend:latest
 
-      - name: Build Frontend
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/boilerplate-frontend:latest ./frontend
-
-      - name: Push Backend
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/boilerplate-backend:latest
-
-      - name: Push Frontend
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/boilerplate-frontend:latest
+      # --------------------------------
+      # 4. Build & Push Frontend
+      # --------------------------------
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/boilerplate-frontend:latest
 
   deploy:
-
     needs: build
-
     runs-on: ubuntu-latest
 
     steps:
-
-      - uses: actions/checkout@v4
-
+      # --------------------------------
+      # 5. Configure SSH
+      # --------------------------------
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
@@ -52,22 +64,41 @@ jobs:
           chmod 600 ~/.ssh/key.pem
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
+      # --------------------------------
+      # 6. Deploy to EC2
+      # --------------------------------
       - name: Deploy to EC2
         run: |
-          ssh -i ~/.ssh/key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -i ~/.ssh/key.pem ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} << EOF
+            set -e
 
-          cd ~/boilerplate
+            echo "===== Deploy Started ====="
 
-          git pull origin main
+            cd ~/boilerplate
 
-          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+            echo "Pull latest code"
+            git pull origin main
 
-          docker compose pull
+            echo "Login Docker Hub"
+            docker login -u "${{ secrets.DOCKER_USERNAME }}" -p "${{ secrets.DOCKER_PASSWORD }}"
 
-          docker compose down
+            echo "Pull latest images"
+            docker compose pull
 
-          docker compose up -d
+            echo "Restart containers"
+            docker compose down
+            docker compose up -d
 
-          docker image prune -f
+            echo "Run database migrations"
+            docker exec boilerplate_backend alembic upgrade head
 
+            echo "Initialize admin user"
+            docker exec boilerplate_backend python scripts/init_db.py
+
+            echo "Remove unused images"
+            docker image prune -f
+
+            echo "===== Deployment Successful ====="
+
+            docker compose ps
           EOF
