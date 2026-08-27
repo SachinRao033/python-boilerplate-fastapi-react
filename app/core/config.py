@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Database
-    DATABASE_URL: str = "mysql+pymysql://root:root@localhost:3306/boilerplate_db"
+    DATABASE_URL: str = "mysql+pymysql://root:root@mysql:3306/boilerplate_db"
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
 
